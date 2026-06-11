@@ -91,6 +91,20 @@ class Order {
     this.keyword,
   });
 
+  // Getter para calcular el plazo de entrega
+  String get plazoEntrega {
+    final now = DateTime.now();
+    final hoyFormateado = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
+    if (fecha == hoyFormateado) {
+      return "Entregar hoy";
+    } else {
+      return "Entrega urgente";
+    }
+  }
+
+  // Getter para calcular la ganancia del repartidor: Tarifa base $55 + 5% del valor del pedido
+  double get gananciaRepartidor => 55.0 + (total * 0.05);
+
   factory Order.fromJson(Map<String, dynamic> json, {String? docId}) {
     var itemsList = json['items'] as List? ?? [];
     List<OrderItem> parsedItems = itemsList.map((i) => OrderItem.fromJson(i)).toList();
@@ -922,7 +936,44 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(Icons.monetization_on_rounded, size: 16, color: Color(0xFF00A650)),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Tu ganancia: ',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500),
+                        ),
+                        Text(
+                          '\$${orden.gananciaRepartidor.toStringAsFixed(2)} MXN',
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF00A650), fontWeight: FontWeight.bold),
+                        ),
+                        const Spacer(),
+                        const Icon(Icons.calendar_today_rounded, size: 13, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: orden.plazoEntrega.contains('urgente')
+                                ? Colors.redAccent.withOpacity(0.1)
+                                : const Color(0xFF4B1C9E).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            orden.plazoEntrega,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: orden.plazoEntrega.contains('urgente')
+                                  ? Colors.redAccent
+                                  : const Color(0xFF4B1C9E),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     Row(
                       children: [
                         const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
@@ -1092,7 +1143,25 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                           const SizedBox(height: 6),
                           Text(
                             '${order.items.length} artículo(s) • ${order.fecha}',
-                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                            style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Text(
+                                'Ganancia: ',
+                                style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                              ),
+                              Text(
+                                '\$${order.gananciaRepartidor.toStringAsFixed(2)}',
+                                style: const TextStyle(color: Color(0xFF00A650), fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
+                              const Spacer(),
+                              Text(
+                                order.plazoEntrega,
+                                style: const TextStyle(color: Color(0xFF4B1C9E), fontWeight: FontWeight.w600, fontSize: 11),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 8),
                           Row(
@@ -1193,9 +1262,18 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                       const SizedBox(width: 12),
                       const Text('Detalles de Entrega', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       const Spacer(),
-                      Text(
-                        'Total: \$${order.total.toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            'Ganancia: \$${order.gananciaRepartidor.toStringAsFixed(2)} MXN',
+                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF00A650)),
+                          ),
+                          Text(
+                            'Valor pedido: \$${order.total.toStringAsFixed(2)}',
+                            style: const TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -1937,17 +2015,23 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
               color: Colors.white,
               elevation: 2,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: const Padding(
-                padding: EdgeInsets.all(16.0),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
                 child: Column(
                   children: [
-                    ListTile(
+                    const ListTile(
                       leading: Icon(Icons.person_pin_circle_outlined, color: Colors.blue),
-                      title: Text('Emmanuel - Calle Falsa 123'),
+                      title: Text('Emmanuel - Calle Falsa 123', style: TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Text('Querétaro, Qro. CP 76344'),
                     ),
-                    Divider(),
+                    const Divider(),
                     ListTile(
+                      leading: const Icon(Icons.calendar_today_outlined, color: Colors.blue),
+                      title: Text(_ordenActual.plazoEntrega, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text('Fecha de pedido: ${_ordenActual.fecha}'),
+                    ),
+                    const Divider(),
+                    const ListTile(
                       leading: Icon(Icons.phone_iphone, color: Colors.blue),
                       title: Text('+52 442 987 6543'),
                       subtitle: Text('Contacto de cliente'),
@@ -1987,6 +2071,17 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                         Text(
                           '\$${_ordenActual.total.toStringAsFixed(2)}',
                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Text('Tu ganancia por entrega:', style: TextStyle(fontSize: 14, color: Color(0xFF00A650), fontWeight: FontWeight.bold)),
+                        const Spacer(),
+                        Text(
+                          '\$${_ordenActual.gananciaRepartidor.toStringAsFixed(2)}',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF00A650)),
                         ),
                       ],
                     )
