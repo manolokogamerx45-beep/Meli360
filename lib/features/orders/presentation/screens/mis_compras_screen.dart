@@ -79,12 +79,24 @@ class MisComprasScreen extends ConsumerWidget {
                         // Estatus de Envío
                         Row(
                           children: [
-                            const Icon(Icons.local_shipping_outlined, color: AppColors.verdeExito, size: 18),
+                            Icon(
+                              Icons.local_shipping_outlined, 
+                              color: order.status.contains('Entregado')
+                                  ? AppColors.verdeExito
+                                  : order.status.contains('camino')
+                                      ? AppColors.azulLink
+                                      : Colors.orange, 
+                              size: 18,
+                            ),
                             const SizedBox(width: 8),
                             Text(
                               order.status,
-                              style: const TextStyle(
-                                color: AppColors.verdeExito,
+                              style: TextStyle(
+                                color: order.status.contains('Entregado')
+                                    ? AppColors.verdeExito
+                                    : order.status.contains('camino')
+                                        ? AppColors.azulLink
+                                        : Colors.orange,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 12.5,
                               ),
@@ -102,6 +114,36 @@ class MisComprasScreen extends ConsumerWidget {
                             ],
                           ],
                         ),
+                        
+                        // Mostrar código de seguridad de entrega
+                        if (order.keyword != null && !order.status.contains('Entregado')) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF9E6),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFFFE599), width: 1),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.key, color: Colors.orange, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Clave de seguridad para entrega: ${order.keyword}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12.5,
+                                      color: Color(0xFF8A6D3B),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
                         const SizedBox(height: 10),
 
                         // Barra de progreso de envío simulada

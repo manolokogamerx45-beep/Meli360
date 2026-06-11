@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dio/dio.dart';
@@ -18,6 +19,7 @@ class OrderModel {
   final String status;
   final String? repartidor;
   final int? timestamp;
+  final String? keyword; // Palabra clave/PIN de entrega
 
   const OrderModel({
     required this.id,
@@ -27,6 +29,7 @@ class OrderModel {
     required this.status,
     this.repartidor,
     this.timestamp,
+    this.keyword,
   });
 }
 
@@ -36,9 +39,11 @@ class OrdersNotifier extends _$OrdersNotifier {
   WebSocketChannel? _wsChannel;
   final _dio = Dio();
   bool _useFirebase = false;
+  bool _isDisposed = false;
 
   @override
   List<OrderModel> build() {
+    _isDisposed = false;
     // Verificar si Firebase está configurado
     try {
       DefaultFirebaseOptions.currentPlatform;
@@ -55,6 +60,7 @@ class OrdersNotifier extends _$OrdersNotifier {
     }
 
     ref.onDispose(() {
+      _isDisposed = true;
       _firestoreSubscription?.cancel();
       _wsChannel?.sink.close();
     });
@@ -68,6 +74,7 @@ class OrdersNotifier extends _$OrdersNotifier {
         .collection('orders')
         .snapshots()
         .listen((snapshot) {
+      if (_isDisposed) return;
       final orders = snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return _parseOrder(data);
@@ -90,7 +97,7 @@ class OrdersNotifier extends _$OrdersNotifier {
   Future<void> _cargarOrdenesHttp() async {
     try {
       final response = await _dio.get('http://192.168.2.199:3000/api/orders');
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && !_isDisposed) {
         final List data = response.data;
         state = data.map((json) => _parseOrder(json)).toList();
       }
@@ -100,9 +107,11 @@ class OrdersNotifier extends _$OrdersNotifier {
   }
 
   void _conectarWebSocketLocal() {
+    if (_isDisposed) return;
     try {
       _wsChannel = WebSocketChannel.connect(Uri.parse('ws://192.168.2.199:3000'));
       _wsChannel!.stream.listen((message) {
+        if (_isDisposed) return;
         final payload = jsonDecode(message);
         final String type = payload['type'];
         final data = payload['data'];
@@ -125,11 +134,23 @@ class OrdersNotifier extends _$OrdersNotifier {
           }).toList();
         }
       }, onError: (err) {
-        print('[OrdersNotifier WS Fallback Error] $err');
+        print('[OrdersNotifier WS Fallback Error] $err. Reconectando...');
+        _reconectarWebSocket();
+      }, onDone: () {
+        print('[OrdersNotifier WS Fallback Done] Conexión cerrada. Reconectando...');
+        _reconectarWebSocket();
       });
     } catch (e) {
-      print('[OrdersNotifier WS Fallback Connect Error] $e');
+      print('[OrdersNotifier WS Fallback Connect Error] $e. Reconectando...');
+      _reconectarWebSocket();
     }
+  }
+
+  void _reconectarWebSocket() {
+    if (_isDisposed) return;
+    Future.delayed(const Duration(seconds: 5), () {
+      _conectarWebSocketLocal();
+    });
   }
 
   OrderModel _parseOrder(Map<String, dynamic> json) {
@@ -163,6 +184,7 @@ class OrdersNotifier extends _$OrdersNotifier {
       status: json['status'] as String? ?? 'Preparando envío',
       repartidor: json['repartidor'] as String?,
       timestamp: json['timestamp'] as int?,
+      keyword: json['keyword'] as String?,
     );
   }
 
@@ -171,6 +193,10 @@ class OrdersNotifier extends _$OrdersNotifier {
     final fechaFormateada = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
     final orderId = "PED-${now.millisecondsSinceEpoch.toString().substring(7)}";
     final timestamp = now.millisecondsSinceEpoch;
+    
+    // Generar palabra clave de 4 dígitos
+    final random = Random();
+    final keyword = (1000 + random.nextInt(9000)).toString();
     
     // Serializar a JSON para subir
     final payloadItems = items.map((i) => {
@@ -196,6 +222,7 @@ class OrdersNotifier extends _$OrdersNotifier {
       'status': "Preparando envío",
       'repartidor': null,
       'timestamp': timestamp,
+      'keyword': keyword,
     };
 
     if (_useFirebase) {
@@ -217,6 +244,7 @@ class OrdersNotifier extends _$OrdersNotifier {
         status: "Preparando envío",
         repartidor: null,
         timestamp: timestamp,
+        keyword: keyword,
       );
       state = [nuevoPedido, ...state];
       // Subir al servidor local HTTP
