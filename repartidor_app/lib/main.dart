@@ -9,7 +9,7 @@ import 'firebase_options.dart';
 
 // --- CONFIGURACIÓN GLOBAL ---
 class AppConfig {
-  static String serverIp = '192.168.2.199'; // Por defecto tu IP local
+  static String serverIp = '127.0.0.1'; // Por defecto tu IP local (usando adb reverse)
   static String repartidorNombre = 'Juan El Repartidor';
 
   static String get httpUrl => 'http://$serverIp:3000';
@@ -499,6 +499,10 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   Future<void> _actualizarEstado(Order orden, String nuevoEstado) async {
     // Si se va a marcar como entregado, validar el PIN de seguridad
     if (nuevoEstado == 'Entregado') {
+      if (_pinController.text.trim().isEmpty) {
+        _mostrarAlerta('PIN Requerido', 'Debes ingresar la palabra clave obligatoriamente para entregar el paquete.');
+        return;
+      }
       if (orden.keyword != null && _pinController.text.trim() != orden.keyword!.trim()) {
         _mostrarAlerta('PIN de Seguridad Incorrecto', 'El código de seguridad ingresado es incorrecto. Por favor, pídeselo al cliente Emmanuel.');
         return;
@@ -511,12 +515,16 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
           'status': nuevoEstado,
         });
         _pinController.clear();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(nuevoEstado == 'Entregado' ? '¡Pedido entregado con éxito!' : 'Estado actualizado a: $nuevoEstado'),
-            backgroundColor: const Color(0xFF00A650),
-          ),
-        );
+        if (nuevoEstado == 'Entregado') {
+          _mostrarSuccessDialog(orden);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Estado actualizado a: $nuevoEstado'),
+              backgroundColor: const Color(0xFF00A650),
+            ),
+          );
+        }
       } catch (e) {
         _mostrarAlerta('Error', 'No se pudo actualizar el estado: $e');
       }
@@ -532,12 +540,16 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
         if (response.statusCode == 200) {
           _pinController.clear();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(nuevoEstado == 'Entregado' ? '¡Pedido entregado con éxito!' : 'Estado actualizado a: $nuevoEstado'),
-              backgroundColor: const Color(0xFF00A650),
-            ),
-          );
+          if (nuevoEstado == 'Entregado') {
+            _mostrarSuccessDialog(orden);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Estado actualizado a: $nuevoEstado'),
+                backgroundColor: const Color(0xFF00A650),
+              ),
+            );
+          }
         } else {
           _mostrarAlerta('Error', 'No se pudo actualizar estado local: ${response.statusCode}');
         }
@@ -545,6 +557,21 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
         _mostrarAlerta('Error de red', 'Error al comunicar con el servidor local: $e');
       }
     }
+  }
+
+  void _mostrarSuccessDialog(Order orden) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => DeliverySuccessDialog(
+        order: orden,
+        onDismiss: () {
+          setState(() {
+            _selectedOrder = null;
+          });
+        },
+      ),
+    );
   }
 
   void _mostrarAlerta(String titulo, String msg) {
@@ -557,7 +584,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context), 
-            child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4B1C9E)))
+            child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold, color: const Color(0xFF4B1C9E)))
           ),
         ],
       ),
@@ -812,104 +839,156 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       itemCount: list.length,
       itemBuilder: (context, index) {
         final orden = list[index];
-        return Card(
+        final Color statusColor = orden.status.contains('Entregado')
+            ? const Color(0xFF00A650)
+            : orden.status.contains('camino')
+                ? const Color(0xFF3483FA)
+                : Colors.orange;
+
+        return Container(
           margin: const EdgeInsets.only(bottom: 12),
-          elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              if (orden.repartidor != null) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ActiveDeliveryScreen(
-                      orden: orden, 
-                      useFirebase: widget.useFirebase,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              )
+            ],
+            border: Border.all(color: const Color(0xFFEBEFF5), width: 1),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              onTap: () {
+                if (orden.repartidor != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ActiveDeliveryScreen(
+                        orden: orden, 
+                        useFirebase: widget.useFirebase,
+                      ),
                     ),
-                  ),
-                );
-              }
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFE81F),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          orden.id,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2C2500)),
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        'Total: \$${orden.total.toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('Artículos:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
-                  ...orden.items.map((item) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2.0),
-                        child: Text(
-                          '• ${item.quantity}x ${item.title}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      )),
-                  const Divider(height: 24),
-                  Row(
-                    children: [
-                      const Icon(Icons.calendar_today_outlined, size: 14, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Text(orden.fecha, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                      const Spacer(),
-                      if (mostrarBotonAceptar)
-                        ElevatedButton.icon(
-                          onPressed: () => _aceptarPedidoCelular(orden),
-                          icon: const Icon(Icons.check, size: 16),
-                          label: const Text('Aceptar Entrega'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF00A650),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
+                  );
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFE81F).withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFFFE81F), width: 1),
                           ),
-                        )
-                      else
+                          child: Text(
+                            orden.id,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF8A6D3B)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: orden.status.contains('Entregado')
-                                ? const Color(0xFF00A650).withOpacity(0.1)
-                                : const Color(0xFF3483FA).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(4),
+                            color: statusColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
                             orden.status,
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 10.5,
                               fontWeight: FontWeight.bold,
-                              color: orden.status.contains('Entregado')
-                                  ? const Color(0xFF00A650)
-                                  : const Color(0xFF3483FA),
+                              color: statusColor,
                             ),
                           ),
                         ),
-                    ],
-                  )
-                ],
+                        const Spacer(),
+                        Text(
+                          '\$${orden.total.toStringAsFixed(2)}',
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF1F1F1F)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Destinatario: ',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey),
+                        ),
+                        const Text(
+                          'Emmanuel (Calle Falsa 123)',
+                          style: TextStyle(fontSize: 13, color: Color(0xFF1F1F1F), fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.inventory_2_outlined, size: 16, color: Colors.grey),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Artículos del pedido:',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 22.0, top: 4.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: orden.items.map((item) => Text(
+                          '${item.quantity}x ${item.title}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF555555)),
+                        )).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Divider(height: 1, color: Color(0xFFEBEFF5)),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(Icons.access_time_rounded, size: 14, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Text(
+                          orden.fecha, 
+                          style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        const Spacer(),
+                        if (mostrarBotonAceptar)
+                          SizedBox(
+                            height: 36,
+                            child: ElevatedButton.icon(
+                              onPressed: () => _aceptarPedidoCelular(orden),
+                              icon: const Icon(Icons.check_rounded, size: 16),
+                              label: const Text('Aceptar Pedido'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF00A650),
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(horizontal: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
+                  ],
+                ),
               ),
             ),
           ),
@@ -945,75 +1024,100 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       itemBuilder: (context, index) {
         final order = list[index];
         final isSelected = _selectedOrder != null && _selectedOrder!.id == order.id;
+        final Color statusColor = order.status.contains('Entregado')
+            ? const Color(0xFF00A650)
+            : order.status.contains('camino')
+                ? const Color(0xFF3483FA)
+                : Colors.orange;
 
-        return Card(
-          color: isSelected ? const Color(0xFF4B1C9E).withOpacity(0.08) : Colors.white,
-          elevation: isSelected ? 0 : 2,
+        return Container(
           margin: const EdgeInsets.only(bottom: 8),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(
-              color: isSelected ? const Color(0xFF4B1C9E) : Colors.transparent, 
-              width: 1.5
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFF4B1C9E).withOpacity(0.04) : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              if (!isSelected)
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                )
+            ],
+            border: Border.all(
+              color: isSelected ? const Color(0xFF4B1C9E) : const Color(0xFFEBEFF5),
+              width: isSelected ? 1.5 : 1.0,
             ),
           ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              setState(() {
-                _selectedOrder = order;
-                _pinController.clear();
-              });
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        order.id,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                      const Spacer(),
-                      Text(
-                        '\$${order.total.toStringAsFixed(2)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${order.items.length} artículo(s) • ${order.fecha}',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                  ),
-                  const SizedBox(height: 6),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Row(
+              children: [
+                if (isSelected)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: order.status.contains('Entregado')
-                          ? const Color(0xFF00A650).withOpacity(0.1)
-                          : order.status.contains('camino')
-                              ? const Color(0xFF3483FA).withOpacity(0.1)
-                              : Colors.orange.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      order.status,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: order.status.contains('Entregado')
-                            ? const Color(0xFF00A650)
-                            : order.status.contains('camino')
-                                ? const Color(0xFF3483FA)
-                                : Colors.orange,
+                    width: 4.5,
+                    height: 82,
+                    color: const Color(0xFF4B1C9E),
+                  ),
+                Expanded(
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _selectedOrder = order;
+                        _pinController.clear();
+                      });
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                order.id,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1F1F1F)),
+                              ),
+                              const Spacer(),
+                              Text(
+                                '\$${order.total.toStringAsFixed(2)}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1F1F1F)),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '${order.items.length} artículo(s) • ${order.fecha}',
+                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: statusColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  order.status,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: statusColor,
+                                  ),
+                                ),
+                              ),
+                              const Spacer(),
+                              if (isSelected && !order.status.contains('Entregado'))
+                                const Icon(Icons.arrow_forward_ios_rounded, size: 10, color: Color(0xFF4B1C9E)),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
@@ -1093,6 +1197,8 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                   const SizedBox(height: 20),
                   // Glowing timeline progress
                   _buildStepperTimeline(status),
+                  const SizedBox(height: 20),
+                  SimulatedRouteMap(status: status),
                 ],
               ),
             ),
@@ -1307,42 +1413,87 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
     }
 
     if (status == 'En camino') {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Palabra clave de entrega (PIN):',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange),
-          ),
-          const SizedBox(height: 6),
-          TextField(
-            controller: _pinController,
-            keyboardType: TextInputType.number,
-            maxLength: 4,
-            decoration: InputDecoration(
-              counterText: '',
-              hintText: 'Ej: 1234',
-              prefixIcon: const Icon(Icons.key, color: Colors.orange),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF9E6),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFFD966), width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.lock_outline_rounded, color: Colors.orange, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'CONFIRMACIÓN DE SEGURIDAD',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF8A6D3B),
+                    letterSpacing: 1.1,
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: () => _actualizarEstado(order, 'Entregado'),
-              icon: const Icon(Icons.check_circle_outline_rounded),
-              label: const Text('Marcar como Entregado'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00A650),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            const SizedBox(height: 12),
+            const Text(
+              'Solicita la palabra clave de 4 dígitos al cliente para autorizar y finalizar la entrega.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF9E7A2F), height: 1.3),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _pinController,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 8.0,
+                color: Color(0xFFD67C00),
+              ),
+              decoration: InputDecoration(
+                counterText: '',
+                hintText: '••••',
+                hintStyle: TextStyle(color: Colors.orange.withOpacity(0.3), letterSpacing: 8.0),
+                fillColor: Colors.white.withOpacity(0.9),
+                filled: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFFFFD966)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.orange.withOpacity(0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.orange, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: () => _actualizarEstado(order, 'Entregado'),
+                icon: const Icon(Icons.check_circle_rounded),
+                label: const Text('Completar Entrega'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00A650),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 2,
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
@@ -1444,6 +1595,10 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   Future<void> _actualizarEstado(String nuevoEstado) async {
     // Si se va a marcar como entregado, validar el PIN de seguridad
     if (nuevoEstado == 'Entregado') {
+      if (_pinController.text.trim().isEmpty) {
+        _mostrarErrorDialog('PIN Requerido', 'Debes ingresar la palabra clave obligatoriamente para entregar el paquete.');
+        return;
+      }
       if (_ordenActual.keyword != null && _pinController.text.trim() != _ordenActual.keyword!.trim()) {
         _mostrarErrorDialog('PIN de Seguridad Incorrecto', 'El código de seguridad ingresado es incorrecto. Por favor, pídeselo al cliente Emmanuel.');
         return;
@@ -1465,15 +1620,8 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
             _actualizando = false;
           });
 
-          // Si se marca como entregado, volvemos a la lista
           if (nuevoEstado == 'Entregado') {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('¡Pedido entregado con éxito! Volviendo al panel.'),
-                backgroundColor: Color(0xFF00A650),
-              ),
-            );
-            Navigator.pop(context);
+            _mostrarSuccessDialog(_ordenActual);
           }
         }
       } catch (e) {
@@ -1496,22 +1644,16 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
         );
 
         if (response.statusCode == 200) {
+          final updated = Order.fromJson(json.decode(response.body));
           if (mounted) {
             setState(() {
-              _ordenActual = Order.fromJson(json.decode(response.body));
+              _ordenActual = updated;
               _actualizando = false;
             });
           }
 
-          // Si se marca como entregado, volvemos a la lista
           if (nuevoEstado == 'Entregado') {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('¡Pedido entregado con éxito! Volviendo al panel.'),
-                backgroundColor: Color(0xFF00A650),
-              ),
-            );
-            Navigator.pop(context);
+            _mostrarSuccessDialog(updated);
           }
         } else {
           if (mounted) {
@@ -1548,10 +1690,81 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context), 
-            child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4B1C9E)))
+            child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold, color: const Color(0xFF4B1C9E)))
           ),
         ],
       ),
+    );
+  }
+
+  void _mostrarSuccessDialog(Order orden) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => DeliverySuccessDialog(
+        order: orden,
+        onDismiss: () {
+          Navigator.pop(context); // Close ActiveDeliveryScreen
+        },
+      ),
+    );
+  }
+
+  Widget _buildStepperTimeline(String status) {
+    int activeIndex = 0;
+    if (status.contains('Aceptado')) activeIndex = 1;
+    if (status.contains('camino')) activeIndex = 2;
+    if (status.contains('Entregado')) activeIndex = 3;
+
+    final steps = ['Preparando', 'Aceptado', 'En camino', 'Entregado'];
+    final icons = [Icons.storefront_rounded, Icons.assignment_turned_in_rounded, Icons.directions_bike_rounded, Icons.check_circle_rounded];
+
+    return Row(
+      children: List.generate(4, (index) {
+        final isActive = index <= activeIndex;
+        final color = isActive 
+            ? (index == 3 ? const Color(0xFF00A650) : const Color(0xFF4B1C9E)) 
+            : Colors.grey[300]!;
+
+        return Expanded(
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: color, width: 2),
+                      ),
+                      child: Icon(icons[index], color: color, size: 20),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      steps[index],
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                        color: isActive ? Colors.black87 : Colors.grey,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (index < 3)
+                Container(
+                  width: 30,
+                  height: 3,
+                  color: index < activeIndex 
+                      ? const Color(0xFF4B1C9E) 
+                      : Colors.grey[200],
+                ),
+            ],
+          ),
+        );
+      }),
     );
   }
 
@@ -1574,39 +1787,87 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
         ),
       );
     } else if (status == 'En camino') {
-      actionButton = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Palabra clave de entrega (PIN):',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange),
-          ),
-          const SizedBox(height: 6),
-          TextField(
-            controller: _pinController,
-            keyboardType: TextInputType.number,
-            maxLength: 4,
-            decoration: InputDecoration(
-              counterText: '',
-              hintText: 'Ej: 1234',
-              prefixIcon: const Icon(Icons.key, color: Colors.orange),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      actionButton = Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF9E6),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFFD966), width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.lock_outline_rounded, color: Colors.orange, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'CONFIRMACIÓN DE SEGURIDAD',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF8A6D3B),
+                    letterSpacing: 1.1,
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _actualizando ? null : () => _actualizarEstado('Entregado'),
-            icon: const Icon(Icons.check_circle_outline),
-            label: const Text('Marcar como Entregado'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00A650),
-              foregroundColor: Colors.white,
-              minimumSize: const Size(double.infinity, 50),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            const SizedBox(height: 12),
+            const Text(
+              'Solicita la palabra clave de 4 dígitos al cliente para autorizar y finalizar la entrega.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF9E7A2F), height: 1.3),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            TextField(
+              controller: _pinController,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 8.0,
+                color: Color(0xFFD67C00),
+              ),
+              decoration: InputDecoration(
+                counterText: '',
+                hintText: '••••',
+                hintStyle: TextStyle(color: Colors.orange.withOpacity(0.3), letterSpacing: 8.0),
+                fillColor: Colors.white.withOpacity(0.9),
+                filled: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFFFFD966)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.orange.withOpacity(0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.orange, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: _actualizando ? null : () => _actualizarEstado('Entregado'),
+                icon: const Icon(Icons.check_circle_rounded),
+                label: const Text('Completar Entrega'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00A650),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 2,
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     } else {
       actionButton = const Center(
@@ -1656,21 +1917,13 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    LinearProgressIndicator(
-                      value: status == 'Aceptado por repartidor'
-                          ? 0.33
-                          : status == 'En camino'
-                              ? 0.66
-                              : 1.0,
-                      backgroundColor: Colors.grey[200],
-                      color: status == 'Entregado'
-                          ? const Color(0xFF00A650)
-                          : const Color(0xFF3483FA),
-                    ),
+                    _buildStepperTimeline(status),
                   ],
                 ),
               ),
             ),
+            const SizedBox(height: 20),
+            SimulatedRouteMap(status: status),
             const SizedBox(height: 24),
 
             const Text('Información del Envío', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -1745,6 +1998,529 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
               actionButton,
           ],
         ),
+      ),
+    );
+  }
+}
+
+// --- CLASES Y COMPONENTES DE MAPA SIMULADO Y PANTALLA DE ÉXITO ---
+
+class SimulatedRouteMap extends StatefulWidget {
+  final String status;
+  const SimulatedRouteMap({super.key, required this.status});
+
+  @override
+  State<SimulatedRouteMap> createState() => _SimulatedRouteMapState();
+}
+
+class _SimulatedRouteMapState extends State<SimulatedRouteMap> with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    double progress = 0.15;
+    String distanceText = '1.8 km';
+    String timeText = 'Preparando salida';
+    
+    if (widget.status.contains('Aceptado')) {
+      progress = 0.15;
+      distanceText = '1.8 km';
+      timeText = 'Preparando salida';
+    } else if (widget.status.contains('camino')) {
+      progress = 0.55;
+      distanceText = '0.8 km';
+      timeText = '3 mins aprox.';
+    } else if (widget.status.contains('Entregado')) {
+      progress = 1.0;
+      distanceText = '0 km';
+      timeText = 'Entregado';
+    }
+
+    return Container(
+      height: 180,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF12121A), // Tech dark color
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF4B1C9E).withOpacity(0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          // Grid background pattern
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                return CustomPaint(
+                  painter: TechGridPainter(
+                    animationValue: widget.status.contains('camino') ? _animationController.value : 0.0,
+                  ),
+                );
+              },
+            ),
+          ),
+          // Route and markers
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                double currentProgress = progress;
+                if (widget.status.contains('camino')) {
+                  currentProgress = 0.35 + (_animationController.value * 0.3); // moves back/forth
+                }
+                return CustomPaint(
+                  painter: RoutePainter(
+                    progress: currentProgress,
+                    status: widget.status,
+                    pulseValue: _animationController.value,
+                  ),
+                );
+              },
+            ),
+          ),
+          // HUD overlay
+          Positioned(
+            top: 12,
+            left: 12,
+            right: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.75),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white12, width: 0.8),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: widget.status.contains('Entregado')
+                          ? const Color(0xFF00A650)
+                          : widget.status.contains('camino')
+                              ? const Color(0xFF3483FA)
+                              : Colors.amber,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (widget.status.contains('Entregado')
+                              ? const Color(0xFF00A650)
+                              : widget.status.contains('camino')
+                                  ? const Color(0xFF3483FA)
+                                  : Colors.amber).withOpacity(0.6),
+                          blurRadius: 6,
+                          spreadRadius: 2,
+                        )
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    widget.status.contains('Entregado') 
+                      ? 'Entrega finalizada' 
+                      : widget.status.contains('camino') 
+                        ? 'Ruta activa en tiempo real' 
+                        : 'Esperando salida',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '$distanceText • $timeText',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TechGridPainter extends CustomPainter {
+  final double animationValue;
+  TechGridPainter({required this.animationValue});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF232335).withOpacity(0.4)
+      ..strokeWidth = 0.5;
+
+    const double gridSpacing = 20.0;
+    final double offset = (animationValue * gridSpacing) % gridSpacing;
+
+    for (double x = offset; x < size.width; x += gridSpacing) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    for (double y = offset; y < size.height; y += gridSpacing) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant TechGridPainter oldDelegate) {
+    return oldDelegate.animationValue != animationValue;
+  }
+}
+
+class RoutePainter extends CustomPainter {
+  final double progress;
+  final String status;
+  final double pulseValue;
+
+  RoutePainter({required this.progress, required this.status, required this.pulseValue});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final startPoint = Offset(size.width * 0.15, size.height * 0.7);
+    final controlPoint1 = Offset(size.width * 0.35, size.height * 0.2);
+    final controlPoint2 = Offset(size.width * 0.65, size.height * 0.8);
+    final endPoint = Offset(size.width * 0.85, size.height * 0.3);
+
+    final path = Path();
+    path.moveTo(startPoint.dx, startPoint.dy);
+    path.cubicTo(controlPoint1.dx, controlPoint1.dy, controlPoint2.dx, controlPoint2.dy, endPoint.dx, endPoint.dy);
+
+    final roadPaint = Paint()
+      ..color = const Color(0xFF323244)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6.0
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(path, roadPaint);
+
+    final innerRoadPaint = Paint()
+      ..color = const Color(0xFF1E1E2A)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(path, innerRoadPaint);
+
+    final pathMetrics = path.computeMetrics();
+    Path activePath = Path();
+    Offset currentBikePos = startPoint;
+
+    for (var metric in pathMetrics) {
+      final double extractLength = metric.length * progress;
+      activePath.addPath(metric.extractPath(0, extractLength), Offset.zero);
+      final tangent = metric.getTangentForOffset(extractLength);
+      if (tangent != null) {
+        currentBikePos = tangent.position;
+      }
+    }
+
+    final Color routeColor = status.contains('Entregado')
+        ? const Color(0xFF00A650)
+        : const Color(0xFF3483FA);
+
+    final activePaint = Paint()
+      ..color = routeColor.withOpacity(0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 8.0
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3)
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(activePath, activePaint);
+
+    final activeCorePaint = Paint()
+      ..color = routeColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(activePath, activeCorePaint);
+
+    // Start Node
+    final startPaint = Paint()
+      ..color = const Color(0xFFE3E3E3)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(startPoint, 8, startPaint);
+    final startInnerPaint = Paint()
+      ..color = const Color(0xFF4B1C9E)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(startPoint, 4, startInnerPaint);
+
+    // End Node
+    final endPulsePaint = Paint()
+      ..color = const Color(0xFF00A650).withOpacity(0.2 * (1.0 - pulseValue))
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(endPoint, 12 + (16 * pulseValue), endPulsePaint);
+
+    final endPaint = Paint()
+      ..color = const Color(0xFF00A650)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(endPoint, 8, endPaint);
+    final endInnerPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(endPoint, 3, endInnerPaint);
+
+    // Rider Node
+    if (!status.contains('Entregado') || progress < 1.0) {
+      final bikeGlowPaint = Paint()
+        ..color = const Color(0xFF3483FA).withOpacity(0.3 * (1.0 - pulseValue))
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(currentBikePos, 14 + (8 * pulseValue), bikeGlowPaint);
+
+      final bikePaint = Paint()
+        ..color = const Color(0xFF3483FA)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(currentBikePos, 8, bikePaint);
+
+      final bikeCorePaint = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(currentBikePos, 3, bikeCorePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant RoutePainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.status != status ||
+        oldDelegate.pulseValue != pulseValue;
+  }
+}
+
+class DeliverySuccessDialog extends StatelessWidget {
+  final Order order;
+  final VoidCallback onDismiss;
+
+  const DeliverySuccessDialog({super.key, required this.order, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      elevation: 20,
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 400,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            )
+          ]
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              height: 160,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF00A650), Color(0xFF00E676)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(28),
+                  topRight: Radius.circular(28),
+                ),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned(
+                    left: -20,
+                    top: -20,
+                    child: CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Colors.white.withOpacity(0.1),
+                    ),
+                  ),
+                  Positioned(
+                    right: -30,
+                    bottom: -10,
+                    child: CircleAvatar(
+                      radius: 60,
+                      backgroundColor: Colors.white.withOpacity(0.1),
+                    ),
+                  ),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.check_rounded,
+                          size: 48,
+                          color: Color(0xFF00A650),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        '¡ENTREGA EXITOSA!',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 24.0),
+              child: Column(
+                children: [
+                  const Text(
+                    '¡Buen trabajo, Juan!',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F1F1F)),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Has validado la entrega correctamente con el cliente.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          icon: Icons.timer_outlined,
+                          iconColor: const Color(0xFF4B1C9E),
+                          label: 'Tiempo total',
+                          value: '14 mins',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildStatCard(
+                          icon: Icons.star_rounded,
+                          iconColor: Colors.amber,
+                          label: 'Calificación',
+                          value: '5.0 ★',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          icon: Icons.monetization_on_outlined,
+                          iconColor: const Color(0xFF00A650),
+                          label: 'Ganancia extra',
+                          value: r'+$45.00 MXN',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildStatCard(
+                          icon: Icons.offline_pin_rounded,
+                          iconColor: const Color(0xFF3483FA),
+                          label: 'ID Pedido',
+                          value: order.id.length > 8 ? order.id.substring(0, 8) : order.id,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context); // Close dialog
+                        onDismiss();            // Additional actions
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00A650),
+                        foregroundColor: Colors.white,
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: const Text(
+                        'Listo, continuar',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F8FA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFEBEFF5), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: iconColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF1F1F1F)),
+          ),
+        ],
       ),
     );
   }
