@@ -1,72 +1,131 @@
-# Mercado Libre Clone - Flutter 🚀
+# Mercado Libre Clone & Repartidor - Multi-App Flutter + Firebase 🚀
 
-Una réplica interactiva y de alto rendimiento de la aplicación móvil de Mercado Libre, desarrollada en Flutter. Esta versión incluye un flujo de navegación completo, simulación de carrito de compras, y optimizaciones avanzadas de rendimiento y búsqueda.
+Este repositorio contiene un ecosistema interactivo de dos aplicaciones de Flutter que simulan el flujo de compra, despacho y entrega de **Mercado Libre**, utilizando **Firebase Firestore** para la sincronización en tiempo real.
+
+---
+
+## 📱 Componentes del Proyecto
+
+El proyecto está dividido en dos aplicaciones principales y un servicio de backend:
+
+1. **Mercado Libre Clone (Cliente)** (Ubicado en la raíz `/`):
+   - Réplica de la app de usuario de Mercado Libre.
+   - Búsqueda dinámica conectada a la API de Mercado Libre (sitio MLM - México) o mocks locales optimizados.
+   - Simulación de carrito de compras global (Riverpod) y flujo de pedidos.
+   - Creación de pedidos directamente en **Cloud Firestore**.
+
+2. **Repartidor App (Reparto)** (Ubicado en `/repartidor_app`):
+   - Aplicación para los repartidores encargados de la entrega.
+   - Escucha en tiempo real (mediante Streams de Firestore) de pedidos disponibles.
+   - Flujo para tomar pedidos, cambiar su estado (En camino, Entregado) y actualizar el estado de la entrega.
+   - Login simulado de repartidor.
+
+3. **Backend / Servidor Auxiliar** (Ubicado en `/backend`):
+   - Servidor Node.js utilizado para optimización de recursos, imágenes y servicios adicionales.
 
 ---
 
 ## ✨ Características Principales
 
-1. **Buscador Dinámico e Interactivo**:
-   - Barra de búsqueda limpia desde el inicio (sin términos preestablecidos molestos).
-   - Botón de limpiar ("X") integrado para vaciar el texto con un solo toque.
-   - Sincronización automática de pestañas superiores con el término buscado.
-   
-2. **Pantalla de Inicio Inteligente**:
-   - **Modo Promocional**: Si no hay búsqueda activa, muestra el carrusel de banners del Día del Padre, beneficios de Meli+, accesos rápidos (Ofertas, Afiliados, etc.), ofertas relámpago con contador de tiempo y videos destacados.
-   - **Modo Resultados**: Al buscar un término o seleccionar una categoría, oculta las promociones estáticas y muestra una cuadrícula responsiva con los resultados correspondientes obtenidos en tiempo real de la API de Mercado Libre o mocks enriquecidos.
-   
-3. **Carga Ultra Rápida de Imágenes (Optimización Unsplash)**:
-   - Las imágenes de productos provienen de Unsplash y se optimizan dinámicamente agregando parámetros de tamaño y calidad en el backend (`w=350&q=70&fit=crop`).
-   - Reduce el consumo de datos de red móvil de ~10MB por imagen a tan solo **15-30KB**, logrando que el feed de productos cargue instantáneamente y evitando caídas o congelamientos de memoria en el celular.
+### 1. Sincronización en Tiempo Real con Firebase Firestore 🔥
+- Al finalizar un pedido en la app del cliente, los datos se guardan instantáneamente en Firestore.
+- La **App de Repartidores** recibe una actualización automática en segundos en la sección de *"Disponibles"*.
+- Las actualizaciones de estado hechas por el repartidor se sincronizan inmediatamente en la base de datos global.
 
-4. **Navegación e Integración Completa**:
-   - **Categorías**: Pantalla interactiva que permite ver productos específicos por departamento (Tecnología, Ropa, Herramientas, etc.).
-   - **Detalle de Producto**: Información técnica, envío gratuito, devolución, cuotas mensuales sin interés y botones de compra.
-   - **Carrito**: Estado global compartido usando Riverpod para añadir productos y reflejar cantidades en la barra de navegación.
+### 2. Buscador Dinámico e Interactivo (App Cliente)
+- Barra de búsqueda limpia con botón de limpiar rápido.
+- Sincronización automática de las pestañas superiores con el término buscado.
+- Modo Promocional completo (carruseles, banners de Meli+, ofertas relámpago con cuenta regresiva) y Modo de Resultados dinámico.
+
+### 3. Carga Ultra Rápida de Imágenes (Optimización Unsplash)
+- Las imágenes de productos provienen de Unsplash y se optimizan dinámicamente agregando parámetros de tamaño y calidad en el backend (`w=350&q=70&fit=crop`).
+- Reduce el consumo de datos móviles de ~10MB por imagen a tan solo **15-30KB**, logrando cargas instantáneas y evitando problemas de memoria en el celular.
+
+### 4. Navegación y Estado Limpio
+- **Manejo de Estado**: Riverpod con generación de código (`riverpod_generator`) en ambas apps para un estado consistente y reactivo.
+- **Navegación**: GoRouter para rutas limpias y estructuradas.
 
 ---
 
 ## 🛠️ Tecnologías Utilizadas
 
-* **Framework**: Flutter & Dart.
-* **Manejo de Estado**: [Flutter Riverpod](https://riverpod.dev/) con generación de código (`riverpod_generator`).
-* **Navegación**: [GoRouter](https://pub.dev/packages/go_router) para rutas limpias y transiciones fluidas.
-* **Peticiones HTTP**: [Dio](https://pub.dev/packages/dio) integrado con la API pública de Mercado Libre (sitio MLM - México).
-* **Almacenamiento e Imagen**: [CachedNetworkImage](https://pub.dev/packages/cached_network_image) para persistencia en caché y [Shimmer](https://pub.dev/packages/shimmer) para esqueletos de carga de interfaz (*skeletons*).
+* **Framework**: Flutter (Dart)
+* **Base de Datos**: Google Cloud Firestore (Firebase)
+* **Manejo de Estado**: [Flutter Riverpod](https://riverpod.dev/) con `riverpod_generator`.
+* **Navegación**: [GoRouter](https://pub.dev/packages/go_router).
+* **Peticiones HTTP**: [Dio](https://pub.dev/packages/dio) integrado con la API pública de Mercado Libre.
+* **Imágenes**: [CachedNetworkImage](https://pub.dev/packages/cached_network_image) y [Shimmer](https://pub.dev/packages/shimmer) para esqueletos de carga.
 
 ---
 
 ## ⚙️ Instalación y Ejecución
 
-Sigue estos pasos para correr el proyecto localmente o instalarlo en un emulador/dispositivo conectado:
+### 🔑 Requisitos Previos: Firebase
+Ambas apps están configuradas para usar Firebase. Asegúrate de tener los archivos de configuración correspondientes en las siguientes rutas (ya pre-configurados para el proyecto `meli360`):
+- `android/app/google-services.json` (App Cliente)
+- `repartidor_app/android/app/google-services.json` (App Repartidor)
 
-1. **Clonar el repositorio**:
-   ```bash
-   git clone https://github.com/manolokogamerx45-beep/Meli360.git
-   cd Meli360
-   ```
+---
 
-2. **Obtener las dependencias de Flutter**:
+### 1️⃣ Ejecutar la App del Cliente (Mercado Libre Clone)
+
+Navega a la carpeta raíz del proyecto:
+
+1. **Obtener las dependencias**:
    ```bash
    flutter pub get
    ```
 
-3. **Ejecutar el generador de código** (necesario si realizas modificaciones en los modelos o proveedores annotados):
+2. **Ejecutar el generador de código** (build_runner):
    ```bash
    flutter pub run build_runner build --delete-conflicting-outputs
    ```
 
-4. **Correr la aplicación**:
-   - **En modo Depuración (Debug)**:
+3. **Ejecutar la app**:
+   - En modo Depuración (Debug):
      ```bash
      flutter run
      ```
-   - **Instalar en un dispositivo físico específico**:
+   - Instalar en un dispositivo físico específico:
      ```bash
      flutter install -d <ID_DEL_DISPOSITIVO>
      ```
 
-5. **Compilar la APK de Producción (Release)**:
+4. **Compilar APK**:
    ```bash
    flutter build apk --release
    ```
+
+---
+
+### 2️⃣ Ejecutar la App de Repartidores (Repartidor App)
+
+Navega a la carpeta del repartidor:
+```bash
+cd repartidor_app
+```
+
+1. **Obtener las dependencias**:
+   ```bash
+   flutter pub get
+   ```
+
+2. **Ejecutar la app**:
+   - En modo Depuración (Debug):
+     ```bash
+     flutter run
+     ```
+   - Instalar en un dispositivo físico específico:
+     ```bash
+     flutter install -d <ID_DEL_DISPOSITIVO>
+     ```
+
+3. **Compilar APK**:
+   ```bash
+   flutter build apk --release
+   ```
+
+---
+
+> [!NOTE]
+> Para probar el flujo en tiempo real, se recomienda ejecutar la **App de Cliente** en un dispositivo (ej. tu Xiaomi) y la **App de Repartidor** en otro (ej. tu tablet Galaxy Tab S9 Ultra), ambas conectadas a Internet para sincronizar mediante Firestore.
