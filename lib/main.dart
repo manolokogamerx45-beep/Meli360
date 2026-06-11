@@ -7,9 +7,14 @@ import 'app.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    print('[Firebase] Inicializado correctamente en Cliente');
+  } catch (e) {
+    print('[Firebase Warning] No se pudo inicializar Firebase. Se usará el servidor local de respaldo: $e');
+  }
 
   // Inicialización de la aplicación móvil de Mercado Libre envuelta en ProviderScope
   runApp(

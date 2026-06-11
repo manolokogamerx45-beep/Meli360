@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:dio/dio.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import '../../../../firebase_options.dart';
 import '../../../cart/presentation/providers/cart_provider.dart';
 import '../../../home/data/models/product_model.dart';
 
@@ -28,22 +32,39 @@ class OrderModel {
 
 @Riverpod(keepAlive: true)
 class OrdersNotifier extends _$OrdersNotifier {
-  StreamSubscription<QuerySnapshot>? _subscription;
+  StreamSubscription<QuerySnapshot>? _firestoreSubscription;
+  WebSocketChannel? _wsChannel;
+  final _dio = Dio();
+  bool _useFirebase = false;
 
   @override
   List<OrderModel> build() {
-    _escucharFirestore();
+    // Verificar si Firebase está configurado
+    try {
+      DefaultFirebaseOptions.currentPlatform;
+      _useFirebase = true;
+    } catch (_) {
+      _useFirebase = false;
+    }
+
+    if (_useFirebase) {
+      _escucharFirestore();
+    } else {
+      _cargarOrdenesHttp();
+      _conectarWebSocketLocal();
+    }
 
     ref.onDispose(() {
-      _subscription?.cancel();
+      _firestoreSubscription?.cancel();
+      _wsChannel?.sink.close();
     });
 
     return [];
   }
 
-  // Escuchar Firestore en tiempo real
+  // --- MODO FIREBASE ---
   void _escucharFirestore() {
-    _subscription = FirebaseFirestore.instance
+    _firestoreSubscription = FirebaseFirestore.instance
         .collection('orders')
         .snapshots()
         .listen((snapshot) {
@@ -63,6 +84,52 @@ class OrdersNotifier extends _$OrdersNotifier {
     }, onError: (error) {
       print('[OrdersNotifier Firestore Error] $error');
     });
+  }
+
+  // --- MODO LOCAL FALLBACK (HTTP + WS) ---
+  Future<void> _cargarOrdenesHttp() async {
+    try {
+      final response = await _dio.get('http://192.168.2.199:3000/api/orders');
+      if (response.statusCode == 200) {
+        final List data = response.data;
+        state = data.map((json) => _parseOrder(json)).toList();
+      }
+    } catch (e) {
+      print('[OrdersNotifier HTTP Fallback Error] $e');
+    }
+  }
+
+  void _conectarWebSocketLocal() {
+    try {
+      _wsChannel = WebSocketChannel.connect(Uri.parse('ws://192.168.2.199:3000'));
+      _wsChannel!.stream.listen((message) {
+        final payload = jsonDecode(message);
+        final String type = payload['type'];
+        final data = payload['data'];
+
+        if (type == 'init') {
+          final List list = data;
+          state = list.map((json) => _parseOrder(json)).toList();
+        } else if (type == 'new_order') {
+          final nuevaOrden = _parseOrder(data);
+          if (!state.any((o) => o.id == nuevaOrden.id)) {
+            state = [nuevaOrden, ...state];
+          }
+        } else if (type == 'order_updated') {
+          final ordenActualizada = _parseOrder(data);
+          state = state.map((o) {
+            if (o.id == ordenActualizada.id) {
+              return ordenActualizada;
+            }
+            return o;
+          }).toList();
+        }
+      }, onError: (err) {
+        print('[OrdersNotifier WS Fallback Error] $err');
+      });
+    } catch (e) {
+      print('[OrdersNotifier WS Fallback Connect Error] $e');
+    }
   }
 
   OrderModel _parseOrder(Map<String, dynamic> json) {
@@ -105,7 +172,7 @@ class OrdersNotifier extends _$OrdersNotifier {
     final orderId = "PED-${now.millisecondsSinceEpoch.toString().substring(7)}";
     final timestamp = now.millisecondsSinceEpoch;
     
-    // Serializar a JSON para subir a Firestore
+    // Serializar a JSON para subir
     final payloadItems = items.map((i) => {
       'quantity': i.quantity,
       'product': {
@@ -131,16 +198,40 @@ class OrdersNotifier extends _$OrdersNotifier {
       'timestamp': timestamp,
     };
 
-    // Subir a Firestore
-    FirebaseFirestore.instance
-        .collection('orders')
-        .doc(orderId)
-        .set(orderData)
-        .catchError((e) {
-      print('[OrdersNotifier Firestore Error] No se pudo crear el pedido: $e');
-    });
+    if (_useFirebase) {
+      // Subir a Firestore
+      FirebaseFirestore.instance
+          .collection('orders')
+          .doc(orderId)
+          .set(orderData)
+          .catchError((e) {
+        print('[OrdersNotifier Firestore Error] No se pudo crear el pedido: $e');
+      });
+    } else {
+      // Crear objeto local optimista
+      final nuevoPedido = OrderModel(
+        id: orderId,
+        items: List<CartItem>.from(items),
+        total: total,
+        fecha: fechaFormateada,
+        status: "Preparando envío",
+        repartidor: null,
+        timestamp: timestamp,
+      );
+      state = [nuevoPedido, ...state];
+      // Subir al servidor local HTTP
+      _enviarAlServidorHttp(orderData);
+    }
 
     return orderId;
+  }
+
+  Future<void> _enviarAlServidorHttp(Map<String, dynamic> data) async {
+    try {
+      await _dio.post('http://192.168.2.199:3000/api/orders', data: data);
+    } catch (e) {
+      print('[OrdersNotifier Error] No se pudo sincronizar pedido con el servidor local: $e');
+    }
   }
 }
 

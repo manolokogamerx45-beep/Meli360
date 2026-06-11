@@ -1,24 +1,38 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 
 // --- CONFIGURACIÓN GLOBAL ---
 class AppConfig {
+  static String serverIp = '192.168.2.199'; // Por defecto tu IP local
   static String repartidorNombre = 'Repartidor de Prueba';
+
+  static String get httpUrl => 'http://$serverIp:3000';
+  static String get wsUrl => 'ws://$serverIp:3000';
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  runApp(const RepartidorApp());
+  bool useFirebase = false;
+  try {
+    final options = DefaultFirebaseOptions.currentPlatform;
+    await Firebase.initializeApp(options: options);
+    useFirebase = true;
+    print('[Firebase] Inicializado correctamente en Repartidor');
+  } catch (e) {
+    print('[Firebase Warning] No se pudo inicializar Firebase. Se usará el servidor local de respaldo: $e');
+  }
+  runApp(RepartidorApp(useFirebase: useFirebase));
 }
 
 class RepartidorApp extends StatelessWidget {
-  const RepartidorApp({super.key});
+  final bool useFirebase;
+  const RepartidorApp({super.key, required this.useFirebase});
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +47,7 @@ class RepartidorApp extends StatelessWidget {
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFFF5F5F7),
       ),
-      home: const LoginScreen(),
+      home: LoginScreen(useFirebase: useFirebase),
       debugShowCheckedModeBanner: false,
     );
   }
@@ -93,7 +107,8 @@ class Order {
 
 // --- PANTALLA 1: CONFIGURACIÓN E INICIO ---
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final bool useFirebase;
+  const LoginScreen({super.key, required this.useFirebase});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -102,16 +117,19 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _controladorNombre;
+  late final TextEditingController _controladorIp;
 
   @override
   void initState() {
     super.initState();
-    _controladorNombre = TextEditingController(text: 'Juan El Repartidor');
+    _controladorNombre = TextEditingController(text: AppConfig.repartidorNombre);
+    _controladorIp = TextEditingController(text: AppConfig.serverIp);
   }
 
   @override
   void dispose() {
     _controladorNombre.dispose();
+    _controladorIp.dispose();
     super.dispose();
   }
 
@@ -146,10 +164,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF2C2500)),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'Ingresa tu perfil de repartidor para conectarte a la nube de Firebase.',
+                      Text(
+                        widget.useFirebase 
+                          ? 'Ingresa tu perfil de repartidor para conectarte a la nube de Firebase.'
+                          : 'Conexión local: Ingresa tu nombre y la dirección IP de tu servidor local.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey, fontSize: 13),
+                        style: const TextStyle(color: Colors.grey, fontSize: 13),
                       ),
                       const SizedBox(height: 24),
                       TextFormField(
@@ -166,6 +186,24 @@ class _LoginScreenState extends State<LoginScreen> {
                           return null;
                         },
                       ),
+                      if (!widget.useFirebase) ...[
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: _controladorIp,
+                          decoration: const InputDecoration(
+                            labelText: 'IP del Servidor (PC)',
+                            helperText: 'Ej: 192.168.1.75 o localhost',
+                            prefixIcon: Icon(Icons.computer),
+                            border: OutlineInputBorder(),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Por favor ingresa la IP';
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
@@ -174,11 +212,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           onPressed: () {
                             if (_formKey.currentState!.validate()) {
                               AppConfig.repartidorNombre = _controladorNombre.text.trim();
+                              if (!widget.useFirebase) {
+                                AppConfig.serverIp = _controladorIp.text.trim();
+                              }
 
                               Navigator.pushReplacement(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => const OrdersListScreen(),
+                                  builder: (context) => OrdersListScreen(useFirebase: widget.useFirebase),
                                 ),
                               );
                             }
@@ -207,7 +248,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
 // --- PANTALLA 2: PEDIDOS DISPONIBLES EN TIEMPO REAL ---
 class OrdersListScreen extends StatefulWidget {
-  const OrdersListScreen({super.key});
+  final bool useFirebase;
+  const OrdersListScreen({super.key, required this.useFirebase});
 
   @override
   State<OrdersListScreen> createState() => _OrdersListScreenState();
@@ -217,17 +259,28 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   List<Order> _ordenes = [];
   bool _cargando = true;
   String? _error;
-  StreamSubscription<QuerySnapshot>? _subscription;
+  
+  // Firebase
+  StreamSubscription<QuerySnapshot>? _firestoreSubscription;
+
+  // Local Server
+  WebSocketChannel? _wsChannel;
 
   @override
   void initState() {
     super.initState();
-    _escucharFirestore();
+    if (widget.useFirebase) {
+      _escucharFirestore();
+    } else {
+      _cargarOrdenesInicialesHttp();
+      _conectarWebSocketLocal();
+    }
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
+    _firestoreSubscription?.cancel();
+    _wsChannel?.sink.close();
     super.dispose();
   }
 
@@ -238,7 +291,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       _error = null;
     });
 
-    _subscription = FirebaseFirestore.instance
+    _firestoreSubscription = FirebaseFirestore.instance
         .collection('orders')
         .snapshots()
         .listen((snapshot) {
@@ -270,34 +323,124 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
     });
   }
 
-  // Actualiza aceptación del pedido directamente en Firestore
-  Future<void> _aceptarPedido(Order orden) async {
+  // Carga inicial por HTTP (Fallback local)
+  Future<void> _cargarOrdenesInicialesHttp() async {
     try {
-      await FirebaseFirestore.instance.collection('orders').doc(orden.id).update({
-        'status': 'Aceptado por repartidor',
-        'repartidor': AppConfig.repartidorNombre,
-      });
-
-      if (mounted) {
-        final actual = Order(
-          id: orden.id,
-          items: orden.items,
-          total: orden.total,
-          fecha: orden.fecha,
-          status: 'Aceptado por repartidor',
-          repartidor: AppConfig.repartidorNombre,
-          timestamp: orden.timestamp,
-        );
-
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ActiveDeliveryScreen(orden: actual),
-          ),
-        );
+      final response = await http.get(Uri.parse('${AppConfig.httpUrl}/api/orders'));
+      if (response.statusCode == 200) {
+        final List decoded = json.decode(response.body);
+        setState(() {
+          _ordenes = decoded.map((o) => Order.fromJson(o)).toList();
+          _cargando = false;
+        });
+      } else {
+        setState(() {
+          _error = 'Error de servidor local: ${response.statusCode}';
+          _cargando = false;
+        });
       }
     } catch (e) {
-      _mostrarAlerta('Error', 'No se pudo aceptar el pedido: $e');
+      setState(() {
+        _error = 'Error de conexión local: $e\n¿Está el servidor encendido en la IP correcta?';
+        _cargando = false;
+      });
+    }
+  }
+
+  // Conexión WebSocket para sincronización local en tiempo real
+  void _conectarWebSocketLocal() {
+    try {
+      _wsChannel = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
+      _wsChannel!.stream.listen((message) {
+        final payload = json.decode(message);
+        final String type = payload['type'];
+        final data = payload['data'];
+
+        setState(() {
+          if (type == 'init') {
+            final List list = data;
+            _ordenes = list.map((o) => Order.fromJson(o)).toList();
+          } else if (type == 'new_order') {
+            final nuevaOrden = Order.fromJson(data);
+            if (!_ordenes.any((o) => o.id == nuevaOrden.id)) {
+              _ordenes.insert(0, nuevaOrden);
+            }
+          } else if (type == 'order_updated') {
+            final ordenActualizada = Order.fromJson(data);
+            final index = _ordenes.indexWhere((o) => o.id == ordenActualizada.id);
+            if (index != -1) {
+              _ordenes[index] = ordenActualizada;
+            } else {
+              _ordenes.add(ordenActualizada);
+            }
+          }
+        });
+      }, onError: (err) {
+        print('[WS Fallback Error] $err');
+      });
+    } catch (e) {
+      print('[WS Connect Fallback Error] $e');
+    }
+  }
+
+  // Actualiza aceptación del pedido
+  Future<void> _aceptarPedido(Order orden) async {
+    if (widget.useFirebase) {
+      try {
+        await FirebaseFirestore.instance.collection('orders').doc(orden.id).update({
+          'status': 'Aceptado por repartidor',
+          'repartidor': AppConfig.repartidorNombre,
+        });
+
+        if (mounted) {
+          final actual = Order(
+            id: orden.id,
+            items: orden.items,
+            total: orden.total,
+            fecha: orden.fecha,
+            status: 'Aceptado por repartidor',
+            repartidor: AppConfig.repartidorNombre,
+            timestamp: orden.timestamp,
+          );
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ActiveDeliveryScreen(orden: actual, useFirebase: true),
+            ),
+          );
+        }
+      } catch (e) {
+        _mostrarAlerta('Error', 'No se pudo aceptar el pedido en Firebase: $e');
+      }
+    } else {
+      // Local HTTP PATCH
+      try {
+        final response = await http.patch(
+          Uri.parse('${AppConfig.httpUrl}/api/orders/${orden.id}'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'status': 'Aceptado por repartidor',
+            'repartidor': AppConfig.repartidorNombre,
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          final actual = Order.fromJson(json.decode(response.body));
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ActiveDeliveryScreen(orden: actual, useFirebase: false),
+              ),
+            );
+          }
+        } else {
+          _mostrarAlerta('Error', 'No se pudo aceptar el pedido en servidor local: ${response.statusCode}');
+        }
+      } catch (e) {
+        _mostrarAlerta('Error de red', 'Error al comunicar con el servidor local: $e');
+      }
     }
   }
 
@@ -327,14 +470,27 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Pedidos Disponibles', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            Text('Repartidor: ${AppConfig.repartidorNombre}', style: const TextStyle(fontSize: 12, color: Colors.white70)),
+            Text(
+              widget.useFirebase 
+                ? 'Nube Firebase | Repartidor: ${AppConfig.repartidorNombre}' 
+                : 'Servidor Local | Repartidor: ${AppConfig.repartidorNombre}', 
+              style: const TextStyle(fontSize: 11, color: Colors.white70)
+            ),
           ],
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              _escucharFirestore();
+              if (widget.useFirebase) {
+                _escucharFirestore();
+              } else {
+                setState(() {
+                  _cargando = true;
+                  _error = null;
+                });
+                _cargarOrdenesInicialesHttp();
+              }
             },
           )
         ],
@@ -354,7 +510,10 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
                         const SizedBox(height: 16),
                         ElevatedButton(
                           onPressed: () {
-                            Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
+                            Navigator.pushReplacement(
+                              context, 
+                              MaterialPageRoute(builder: (context) => LoginScreen(useFirebase: widget.useFirebase))
+                            );
                           },
                           child: const Text('Volver a Configuración'),
                         )
@@ -457,8 +616,9 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 // --- PANTALLA 3: PEDIDO ACTIVO / CONTROL DE ENTREGA ---
 class ActiveDeliveryScreen extends StatefulWidget {
   final Order orden;
+  final bool useFirebase;
 
-  const ActiveDeliveryScreen({super.key, required this.orden});
+  const ActiveDeliveryScreen({super.key, required this.orden, required this.useFirebase});
 
   @override
   State<ActiveDeliveryScreen> createState() => _ActiveDeliveryScreenState();
@@ -467,23 +627,33 @@ class ActiveDeliveryScreen extends StatefulWidget {
 class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   late Order _ordenActual;
   bool _actualizando = false;
-  StreamSubscription<DocumentSnapshot>? _subscription;
+  
+  // Firebase
+  StreamSubscription<DocumentSnapshot>? _firestoreSubscription;
+
+  // Local WS
+  WebSocketChannel? _wsChannel;
 
   @override
   void initState() {
     super.initState();
     _ordenActual = widget.orden;
-    _escucharDocumento();
+    if (widget.useFirebase) {
+      _escucharFirestore();
+    } else {
+      _conectarWebSocketLocal();
+    }
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
+    _firestoreSubscription?.cancel();
+    _wsChannel?.sink.close();
     super.dispose();
   }
 
-  void _escucharDocumento() {
-    _subscription = FirebaseFirestore.instance
+  void _escucharFirestore() {
+    _firestoreSubscription = FirebaseFirestore.instance
         .collection('orders')
         .doc(_ordenActual.id)
         .snapshots()
@@ -496,9 +666,29 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
           });
         }
       }
-    }, onError: (err) {
-      print('[ActiveDeliveryScreen Firestore Error] $err');
     });
+  }
+
+  void _conectarWebSocketLocal() {
+    try {
+      _wsChannel = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
+      _wsChannel!.stream.listen((message) {
+        final payload = json.decode(message);
+        final String type = payload['type'];
+        final data = payload['data'];
+
+        if (type == 'order_updated') {
+          final ordenActualizada = Order.fromJson(data);
+          if (ordenActualizada.id == _ordenActual.id) {
+            setState(() {
+              _ordenActual = ordenActualizada;
+            });
+          }
+        }
+      });
+    } catch (e) {
+      print('[WS Active Fallback Error] $e');
+    }
   }
 
   Future<void> _actualizarEstado(String nuevoEstado) async {
@@ -506,34 +696,81 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
       _actualizando = true;
     });
 
-    try {
-      await FirebaseFirestore.instance.collection('orders').doc(_ordenActual.id).update({
-        'status': nuevoEstado,
-      });
-
-      if (mounted) {
-        setState(() {
-          _actualizando = false;
+    if (widget.useFirebase) {
+      try {
+        await FirebaseFirestore.instance.collection('orders').doc(_ordenActual.id).update({
+          'status': nuevoEstado,
         });
 
-        // Si se marca como entregado, volvemos a la lista
-        if (nuevoEstado == 'Entregado') {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('¡Pedido entregado con éxito! Volviendo al panel.'),
-              backgroundColor: Color(0xFF00A650),
-            ),
-          );
-          Navigator.pop(context);
+        if (mounted) {
+          setState(() {
+            _actualizando = false;
+          });
+
+          // Si se marca como entregado, volvemos a la lista
+          if (nuevoEstado == 'Entregado') {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('¡Pedido entregado con éxito! Volviendo al panel.'),
+                backgroundColor: Color(0xFF00A650),
+              ),
+            );
+            Navigator.pop(context);
+          }
         }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _actualizando = false;
+          });
+        }
+        _mostrarError('Error al actualizar en Firebase: $e');
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _actualizando = false;
-        });
+    } else {
+      // Local Server Update
+      try {
+        final response = await http.patch(
+          Uri.parse('${AppConfig.httpUrl}/api/orders/${_ordenActual.id}'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'status': nuevoEstado,
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          if (mounted) {
+            setState(() {
+              _ordenActual = Order.fromJson(json.decode(response.body));
+              _actualizando = false;
+            });
+          }
+
+          // Si se marca como entregado, volvemos a la lista
+          if (nuevoEstado == 'Entregado') {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('¡Pedido entregado con éxito! Volviendo al panel.'),
+                backgroundColor: Color(0xFF00A650),
+              ),
+            );
+            Navigator.pop(context);
+          }
+        } else {
+          if (mounted) {
+            setState(() {
+              _actualizando = false;
+            });
+          }
+          _mostrarError('Error al actualizar estado local: ${response.statusCode}');
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _actualizando = false;
+          });
+        }
+        _mostrarError('Error de conexión local: $e');
       }
-      _mostrarError('Error al actualizar: $e');
     }
   }
 
