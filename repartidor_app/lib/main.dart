@@ -91,17 +91,21 @@ class Order {
     this.keyword,
   });
 
-  factory Order.fromJson(Map<String, dynamic> json) {
+  factory Order.fromJson(Map<String, dynamic> json, {String? docId}) {
     var itemsList = json['items'] as List? ?? [];
     List<OrderItem> parsedItems = itemsList.map((i) => OrderItem.fromJson(i)).toList();
 
+    // Normalizar repartidor: string vacío se trata como null (no asignado)
+    final repartidorRaw = json['repartidor'] as String?;
+    final repartidor = (repartidorRaw == null || repartidorRaw.trim().isEmpty) ? null : repartidorRaw;
+
     return Order(
-      id: json['id'] as String? ?? '',
+      id: docId ?? json['id'] as String? ?? '',
       items: parsedItems,
       total: (json['total'] as num? ?? 0).toDouble(),
       fecha: json['fecha'] as String? ?? '',
       status: json['status'] as String? ?? '',
-      repartidor: json['repartidor'] as String?,
+      repartidor: repartidor,
       timestamp: json['timestamp'] as int?,
       keyword: json['keyword'] as String?,
     );
@@ -335,7 +339,8 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
       if (_isDisposed) return;
       final list = snapshot.docs.map((doc) {
         final data = doc.data();
-        return Order.fromJson(data);
+        // Pasamos doc.id para que el Order tenga siempre su ID correcto
+        return Order.fromJson(data, docId: doc.id);
       }).toList();
 
       // Ordenar localmente por timestamp descendente

@@ -77,7 +77,8 @@ class OrdersNotifier extends _$OrdersNotifier {
       if (_isDisposed) return;
       final orders = snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
-        return _parseOrder(data);
+        // Pasar doc.id para que el OrderModel tenga siempre su ID correcto
+        return _parseOrder(data, docId: doc.id);
       }).toList();
 
       // Ordenar localmente por timestamp descendente
@@ -153,7 +154,7 @@ class OrdersNotifier extends _$OrdersNotifier {
     });
   }
 
-  OrderModel _parseOrder(Map<String, dynamic> json) {
+  OrderModel _parseOrder(Map<String, dynamic> json, {String? docId}) {
     final itemsList = json['items'] as List? ?? [];
     final items = itemsList.map((i) {
       final productData = i['product'] as Map<String, dynamic>? ?? {};
@@ -176,13 +177,17 @@ class OrdersNotifier extends _$OrdersNotifier {
       );
     }).toList();
 
+    // Normalizar repartidor: campo ausente o string vacío = null (no asignado)
+    final repartidorRaw = json['repartidor'] as String?;
+    final repartidor = (repartidorRaw == null || repartidorRaw.trim().isEmpty) ? null : repartidorRaw;
+
     return OrderModel(
-      id: json['id'] as String? ?? '',
+      id: docId ?? json['id'] as String? ?? '',
       items: items,
       total: (json['total'] as num? ?? 0).toDouble(),
       fecha: json['fecha'] as String? ?? '',
       status: json['status'] as String? ?? 'Preparando envío',
-      repartidor: json['repartidor'] as String?,
+      repartidor: repartidor,
       timestamp: json['timestamp'] as int?,
       keyword: json['keyword'] as String?,
     );

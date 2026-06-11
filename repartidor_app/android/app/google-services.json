@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "182414043276",
+    "project_id": "meli360",
+    "storage_bucket": "meli360.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:182414043276:android:bfa7c5a7c6d3f4a934b3a9",
+        "android_client_info": {
+          "package_name": "com.example.mercadolibre_clone"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD8ZCnajrJEB26h1r-3GwZxrdoOfuY6ZJ0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:182414043276:android:3623ff02bf2cdf0934b3a9",
+        "android_client_info": {
+          "package_name": "com.example.repartidor_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD8ZCnajrJEB26h1r-3GwZxrdoOfuY6ZJ0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
