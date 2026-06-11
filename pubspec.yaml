@@ -22,6 +22,7 @@ dependencies:
   
   # Red
   dio: ^5.4.1
+  web_socket_channel: ^3.0.1
   
   # Modelos de Datos
   freezed_annotation: ^2.4.1
