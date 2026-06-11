@@ -89,6 +89,17 @@ class MisComprasScreen extends ConsumerWidget {
                                 fontSize: 12.5,
                               ),
                             ),
+                            if (order.repartidor != null) ...[
+                              const Spacer(),
+                              Text(
+                                'Repartidor: ${order.repartidor}',
+                                style: const TextStyle(
+                                  color: AppColors.textoSecundario,
+                                  fontSize: 12,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                         const SizedBox(height: 10),
@@ -193,6 +204,15 @@ class MisComprasScreen extends ConsumerWidget {
   }
 
   Widget _buildProgressBar(String status) {
+    double progress = 0.25;
+    if (status.contains('Aceptado')) {
+      progress = 0.50;
+    } else if (status.contains('camino')) {
+      progress = 0.75;
+    } else if (status.contains('Entregado')) {
+      progress = 1.0;
+    }
+
     return Container(
       height: 4,
       width: double.infinity,
@@ -202,7 +222,7 @@ class MisComprasScreen extends ConsumerWidget {
       ),
       child: FractionallySizedBox(
         alignment: Alignment.centerLeft,
-        widthFactor: 0.35, // Simula "Preparando envío" (35% de progreso)
+        widthFactor: progress,
         child: Container(
           decoration: BoxDecoration(
             color: AppColors.verdeExito,

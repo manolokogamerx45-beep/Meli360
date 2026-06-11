@@ -1,18 +1,19 @@
-import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'firebase_options.dart';
 
 // --- CONFIGURACIÓN GLOBAL ---
 class AppConfig {
-  static String serverIp = '192.168.2.199'; // Por defecto tu IP local
   static String repartidorNombre = 'Repartidor de Prueba';
-
-  static String get httpUrl => 'http://$serverIp:3000';
-  static String get wsUrl => 'ws://$serverIp:3000';
 }
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const RepartidorApp());
 }
 
@@ -48,9 +49,9 @@ class OrderItem {
 
   factory OrderItem.fromJson(Map<String, dynamic> json) {
     return OrderItem(
-      title: json['product']['title'] as String,
-      quantity: json['quantity'] as int,
-      price: (json['product']['price'] as num).toDouble(),
+      title: json['product']['title'] as String? ?? '',
+      quantity: json['quantity'] as int? ?? 1,
+      price: (json['product']['price'] as num? ?? 0).toDouble(),
     );
   }
 }
@@ -62,6 +63,7 @@ class Order {
   final String fecha;
   final String status;
   final String? repartidor;
+  final int? timestamp;
 
   Order({
     required this.id,
@@ -70,19 +72,21 @@ class Order {
     required this.fecha,
     required this.status,
     this.repartidor,
+    this.timestamp,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
-    var itemsList = json['items'] as List;
+    var itemsList = json['items'] as List? ?? [];
     List<OrderItem> parsedItems = itemsList.map((i) => OrderItem.fromJson(i)).toList();
 
     return Order(
-      id: json['id'] as String,
+      id: json['id'] as String? ?? '',
       items: parsedItems,
-      total: (json['total'] as num).toDouble(),
-      fecha: json['fecha'] as String,
-      status: json['status'] as String,
+      total: (json['total'] as num? ?? 0).toDouble(),
+      fecha: json['fecha'] as String? ?? '',
+      status: json['status'] as String? ?? '',
       repartidor: json['repartidor'] as String?,
+      timestamp: json['timestamp'] as int?,
     );
   }
 }
@@ -98,19 +102,16 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _controladorNombre;
-  late final TextEditingController _controladorIp;
 
   @override
   void initState() {
     super.initState();
     _controladorNombre = TextEditingController(text: 'Juan El Repartidor');
-    _controladorIp = TextEditingController(text: '192.168.2.199'); // Tu IP local detectada
   }
 
   @override
   void dispose() {
     _controladorNombre.dispose();
-    _controladorIp.dispose();
     super.dispose();
   }
 
@@ -146,7 +147,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Ingresa tu perfil y la dirección IP de tu servidor local.',
+                        'Ingresa tu perfil de repartidor para conectarte a la nube de Firebase.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.grey, fontSize: 13),
                       ),
@@ -165,22 +166,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _controladorIp,
-                        decoration: const InputDecoration(
-                          labelText: 'IP del Servidor (PC)',
-                          helperText: 'Ej: 192.168.1.75 o localhost',
-                          prefixIcon: Icon(Icons.computer),
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Por favor ingresa la IP';
-                          }
-                          return null;
-                        },
-                      ),
                       const SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
@@ -189,7 +174,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           onPressed: () {
                             if (_formKey.currentState!.validate()) {
                               AppConfig.repartidorNombre = _controladorNombre.text.trim();
-                              AppConfig.serverIp = _controladorIp.text.trim();
 
                               Navigator.pushReplacement(
                                 context,
@@ -233,113 +217,87 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
   List<Order> _ordenes = [];
   bool _cargando = true;
   String? _error;
-  WebSocketChannel? _channel;
+  StreamSubscription<QuerySnapshot>? _subscription;
 
   @override
   void initState() {
     super.initState();
-    _cargarOrdenesIniciales();
-    _conectarWebSocket();
+    _escucharFirestore();
   }
 
   @override
   void dispose() {
-    _channel?.sink.close();
+    _subscription?.cancel();
     super.dispose();
   }
 
-  // Carga inicial por HTTP
-  Future<void> _cargarOrdenesIniciales() async {
-    try {
-      final response = await http.get(Uri.parse('${AppConfig.httpUrl}/api/orders'));
-      if (response.statusCode == 200) {
-        final List decoded = json.decode(response.body);
+  // Escucha de Firestore para sincronización en tiempo real
+  void _escucharFirestore() {
+    setState(() {
+      _cargando = true;
+      _error = null;
+    });
+
+    _subscription = FirebaseFirestore.instance
+        .collection('orders')
+        .snapshots()
+        .listen((snapshot) {
+      final list = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return Order.fromJson(data);
+      }).toList();
+
+      // Ordenar localmente por timestamp descendente
+      list.sort((a, b) {
+        final aTime = a.timestamp ?? 0;
+        final bTime = b.timestamp ?? 0;
+        return bTime.compareTo(aTime);
+      });
+
+      if (mounted) {
         setState(() {
-          _ordenes = decoded.map((o) => Order.fromJson(o)).toList();
-          _cargando = false;
-        });
-      } else {
-        setState(() {
-          _error = 'Error de servidor: ${response.statusCode}';
+          _ordenes = list;
           _cargando = false;
         });
       }
-    } catch (e) {
-      setState(() {
-        _error = 'Error de conexión: $e\n¿Está el servidor encendido en la IP correcta?';
-        _cargando = false;
-      });
-    }
-  }
-
-  // Conexión WebSocket para sincronización en tiempo real
-  void _conectarWebSocket() {
-    try {
-      _channel = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
-      _channel!.stream.listen((message) {
-        final payload = json.decode(message);
-        final String type = payload['type'];
-        final data = payload['data'];
-
+    }, onError: (err) {
+      if (mounted) {
         setState(() {
-          if (type == 'init') {
-            final List list = data;
-            _ordenes = list.map((o) => Order.fromJson(o)).toList();
-          } else if (type == 'new_order') {
-            final nuevaOrden = Order.fromJson(data);
-            // Evitar duplicados
-            if (!_ordenes.any((o) => o.id == nuevaOrden.id)) {
-              _ordenes.insert(0, nuevaOrden);
-            }
-          } else if (type == 'order_updated') {
-            final ordenActualizada = Order.fromJson(data);
-            final index = _ordenes.indexWhere((o) => o.id == ordenActualizada.id);
-            if (index != -1) {
-              _ordenes[index] = ordenActualizada;
-            } else {
-              _ordenes.add(ordenActualizada);
-            }
-          }
+          _error = 'Error al conectar con Firebase: $err';
+          _cargando = false;
         });
-      }, onError: (err) {
-        print('[WS Error] $err');
-      }, onDone: () {
-        print('[WS Close] Conexión cerrada');
-      });
-    } catch (e) {
-      print('[WS Conectar Error] $e');
-    }
+      }
+    });
   }
 
-  // Envia aceptación del pedido por HTTP PATCH
+  // Actualiza aceptación del pedido directamente en Firestore
   Future<void> _aceptarPedido(Order orden) async {
     try {
-      final response = await http.patch(
-        Uri.parse('${AppConfig.httpUrl}/api/orders/${orden.id}'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'status': 'Aceptado por repartidor',
-          'repartidor': AppConfig.repartidorNombre,
-        }),
-      );
+      await FirebaseFirestore.instance.collection('orders').doc(orden.id).update({
+        'status': 'Aceptado por repartidor',
+        'repartidor': AppConfig.repartidorNombre,
+      });
 
-      if (response.statusCode == 200) {
-        final actual = Order.fromJson(json.decode(response.body));
-        
-        // Ir a pantalla de pedido activo
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ActiveDeliveryScreen(orden: actual),
-            ),
-          );
-        }
-      } else {
-        _mostrarAlerta('Error', 'No se pudo aceptar el pedido: ${response.statusCode}');
+      if (mounted) {
+        final actual = Order(
+          id: orden.id,
+          items: orden.items,
+          total: orden.total,
+          fecha: orden.fecha,
+          status: 'Aceptado por repartidor',
+          repartidor: AppConfig.repartidorNombre,
+          timestamp: orden.timestamp,
+        );
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ActiveDeliveryScreen(orden: actual),
+          ),
+        );
       }
     } catch (e) {
-      _mostrarAlerta('Error de red', 'Error al comunicar con el servidor: $e');
+      _mostrarAlerta('Error', 'No se pudo aceptar el pedido: $e');
     }
   }
 
@@ -358,7 +316,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Filtrar pedidos disponibles (sin repartidor asignado y listos para enviar)
+    // Filtrar pedidos disponibles (sin repartidor asignado)
     final disponibles = _ordenes.where((o) => o.repartidor == null).toList();
 
     return Scaffold(
@@ -376,11 +334,7 @@ class _OrdersListScreenState extends State<OrdersListScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              setState(() {
-                _cargando = true;
-                _error = null;
-              });
-              _cargarOrdenesIniciales();
+              _escucharFirestore();
             },
           )
         ],
@@ -513,41 +467,38 @@ class ActiveDeliveryScreen extends StatefulWidget {
 class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
   late Order _ordenActual;
   bool _actualizando = false;
-  WebSocketChannel? _channel;
+  StreamSubscription<DocumentSnapshot>? _subscription;
 
   @override
   void initState() {
     super.initState();
     _ordenActual = widget.orden;
-    _conectarWebSocket();
+    _escucharDocumento();
   }
 
   @override
   void dispose() {
-    _channel?.sink.close();
+    _subscription?.cancel();
     super.dispose();
   }
 
-  void _conectarWebSocket() {
-    try {
-      _channel = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
-      _channel!.stream.listen((message) {
-        final payload = json.decode(message);
-        final String type = payload['type'];
-        final data = payload['data'];
-
-        if (type == 'order_updated') {
-          final ordenActualizada = Order.fromJson(data);
-          if (ordenActualizada.id == _ordenActual.id) {
-            setState(() {
-              _ordenActual = ordenActualizada;
-            });
-          }
+  void _escucharDocumento() {
+    _subscription = FirebaseFirestore.instance
+        .collection('orders')
+        .doc(_ordenActual.id)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.exists && snapshot.data() != null) {
+        final updated = Order.fromJson(snapshot.data()!);
+        if (mounted) {
+          setState(() {
+            _ordenActual = updated;
+          });
         }
-      });
-    } catch (e) {
-      print('[WS Active Connect Error] $e');
-    }
+      }
+    }, onError: (err) {
+      print('[ActiveDeliveryScreen Firestore Error] $err');
+    });
   }
 
   Future<void> _actualizarEstado(String nuevoEstado) async {
@@ -556,17 +507,12 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
     });
 
     try {
-      final response = await http.patch(
-        Uri.parse('${AppConfig.httpUrl}/api/orders/${_ordenActual.id}'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'status': nuevoEstado,
-        }),
-      );
+      await FirebaseFirestore.instance.collection('orders').doc(_ordenActual.id).update({
+        'status': nuevoEstado,
+      });
 
-      if (response.statusCode == 200) {
+      if (mounted) {
         setState(() {
-          _ordenActual = Order.fromJson(json.decode(response.body));
           _actualizando = false;
         });
 
@@ -580,17 +526,14 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen> {
           );
           Navigator.pop(context);
         }
-      } else {
+      }
+    } catch (e) {
+      if (mounted) {
         setState(() {
           _actualizando = false;
         });
-        _mostrarError('Error al actualizar el estado: ${response.statusCode}');
       }
-    } catch (e) {
-      setState(() {
-        _actualizando = false;
-      });
-      _mostrarError('Error de conexión: $e');
+      _mostrarError('Error al actualizar: $e');
     }
   }
 
